@@ -50,9 +50,10 @@ def detect_region(address: str) -> str:
     # 這裡同時收韓文、中文與英文拼音，提升匹配成功率。
     east = [
         '성산읍', '표선면', '남원읍', '구좌읍', '조천읍',
-        '성산', '표선', '남원', '城山', '表善', '南元', '旧左', '朝天',
+        '성산', '표선', '남원', '城山', '表善', '南元', '旧左', '朝天', '朝天邑', '조함해안로',
         'seongsaneup', 'seongsan', 'pyoseonmyeon', 'pyoseon',
-        'namwoneup', 'namwon', 'gujwaeup', 'gujwa', 'jocheoneup', 'jocheon',
+        'namwoneup', 'namwon', 'gujwaeup', 'gujwa',
+        'jocheoneup', 'jocheon-eup', 'jocheon', 'johamhaeanro', 'johamhaean-ro',
     ]
 
     # 西部常見行政區與多語系關鍵字。
