@@ -395,17 +395,38 @@ def normalize_review_summary(summary: dict[str, Any], default_message: str) -> d
 
 def extract_azure_message_content(data: dict[str, Any]) -> str:
     """兼容 Azure OpenAI 不同 content 結構。"""
-    message_content = data['choices'][0]['message']['content']
+    choices = data.get('choices')
+    if not isinstance(choices, list) or not choices:
+        raise KeyError('Azure OpenAI choices is missing')
+
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        raise TypeError('Azure OpenAI choice format is invalid')
+
+    message = first_choice.get('message')
+    if not isinstance(message, dict):
+        raise KeyError('Azure OpenAI message is missing')
+
+    message_content = message.get('content')
     if isinstance(message_content, str):
         return message_content
 
     if isinstance(message_content, list):
         text_parts: list[str] = []
         for item in message_content:
-            if isinstance(item, dict) and item.get('type') == 'text':
-                text_value = item.get('text')
-                if isinstance(text_value, str):
-                    text_parts.append(text_value)
+            if not isinstance(item, dict):
+                continue
+
+            if item.get('type') != 'text':
+                continue
+
+            text_value = item.get('text')
+            if isinstance(text_value, str):
+                text_parts.append(text_value)
+            elif isinstance(text_value, dict):
+                nested_text = text_value.get('value')
+                if isinstance(nested_text, str):
+                    text_parts.append(nested_text)
         if text_parts:
             return ''.join(text_parts)
 
@@ -760,12 +781,19 @@ async def summarize_reviews_with_azure(
                 '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
             )
 
-    data = response.json()
     try:
+        data = response.json()
         message = extract_azure_message_content(data)
         summary = parse_json_response(message)
-    except (KeyError, json.JSONDecodeError) as exc:
+    except (KeyError, TypeError, IndexError, ValueError, json.JSONDecodeError) as exc:
         print(f'⚠️ Azure OpenAI 回傳格式異常：{exc}')
+        fallback_summary = build_review_summary_fallback(sanitized_reviews)
+        return normalize_review_summary(
+            fallback_summary,
+            '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+        )
+    except Exception as exc:
+        print(f'⚠️ Azure OpenAI 摘要處理失敗：{exc}')
         fallback_summary = build_review_summary_fallback(sanitized_reviews)
         return normalize_review_summary(
             fallback_summary,
@@ -808,6 +836,17 @@ async def build_review_summary_with_fallback(
         return summary
     except Exception as exc:
         print(f'⚠️ 評論摘要非預期錯誤：{exc}')
+        fallback_reviews = sanitize_reviews_for_summary(place.get('reviews', []))
+        if fallback_reviews:
+            summary = build_review_summary_fallback(fallback_reviews)
+            summary = normalize_review_summary(
+                summary,
+                '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+            )
+            summary['review_count'] = len(fallback_reviews)
+            summary['review_source'] = 'places_api_fallback_after_error'
+            return summary
+
         summary = build_empty_review_summary('評論摘要流程失敗，請稍後再試。')
         summary['review_count'] = 0
         summary['review_source'] = 'summary_error'
