@@ -80,6 +80,8 @@ python -m playwright install chromium
 uvicorn main:app --reload --port 3000
 ```
 
+若更新了 `playwright` 套件版本，請重新執行一次 `python -m playwright install chromium`，避免套件版本與瀏覽器執行檔不一致。
+
 啟動後可用以下網址確認服務狀態：
 
 ```bash
