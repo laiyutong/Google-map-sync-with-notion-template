@@ -37,8 +37,15 @@
 ```text
 .
 ├── .dockerignore
+├── app/
+│   ├── config.py
+│   ├── main.py
+│   ├── schemas/
+│   ├── services/
+│   └── utils/
 ├── main.py
 ├── Dockerfile
+├── images/
 ├── requirements.txt
 ├── Procfile
 ├── .env
