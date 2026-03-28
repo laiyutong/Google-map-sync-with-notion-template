@@ -70,6 +70,25 @@
 - `.env.example`: 環境變數範例。
 - `images/`: README 使用的示意圖片。
 
+## Notion 寫入邏輯
+
+程式會優先搜尋可存取的 Notion data source：
+
+- 若找到名稱符合 `NOTION_TARGET_NAME` 的 data source，會直接寫入對應資料庫
+- 若找不到但只找到一個可用 data source，會自動使用
+- 若 `NOTION_DATABASE_ID` 是 Database，會建立資料列
+- 若 `NOTION_DATABASE_ID` 是 Page，會改為建立子頁
+
+目前會嘗試對應下列欄位：
+
+- `Name` 或資料庫中的 title 欄位
+- `分類`
+- `日程`
+- `Google Map`
+- `評分`
+- `經度(lng)`
+- `緯度(lat)`
+
 ## 環境變數
 
 請先複製範例檔：
@@ -167,25 +186,6 @@ curl "http://127.0.0.1:3000/save-preview-link?url=https%3A%2F%2Fmaps.app.goo.gl%
 ```bash
 curl "http://127.0.0.1:3000/save-link?url=https%3A%2F%2Fmaps.app.goo.gl%2Fyour-share-link"
 ```
-
-## Notion 寫入邏輯
-
-程式會優先搜尋可存取的 Notion data source：
-
-- 若找到名稱符合 `NOTION_TARGET_NAME` 的 data source，會直接寫入對應資料庫
-- 若找不到但只找到一個可用 data source，會自動使用
-- 若 `NOTION_DATABASE_ID` 是 Database，會建立資料列
-- 若 `NOTION_DATABASE_ID` 是 Page，會改為建立子頁
-
-目前會嘗試對應下列欄位：
-
-- `Name` 或資料庫中的 title 欄位
-- `分類`
-- `日程`
-- `Google Map`
-- `評分`
-- `經度(lng)`
-- `緯度(lat)`
 
 ## Railway 部署
 
