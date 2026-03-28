@@ -195,7 +195,7 @@ NOTION_DATABASE_ID=...
 - `app/services/reviews.py`: 處理評論摘要流程。會先整理 Places API 回來的 reviews，再送到 Azure OpenAI 產生繁體中文摘要，同時處理 fallback、錯誤訊息與摘要格式統一。
 - `app/services/articles.py`: 負責搜尋景點相關文章，整理外部搜尋結果，讓回傳或 Notion 頁面可以附帶參考連結。
 - `app/services/notion.py`: 專門處理 Notion 寫入邏輯。包含欄位對應、頁面內容 block 組裝、資料庫 schema 判斷，以及實際建立 Notion page 或 database row。
-- `app/utils/region.py`: 放與地區判斷有關的純工具函式，例如把地址對應到 `濟州市`、`西部`、`西歸浦`、`東部`，以及依區域推算 `Day1~Day4` 與評分星等文字。
+- `app/utils/region.py`: 放與地區判斷有關的純工具函式，例如把地址對應到 `濟州市`、`西部`、`西歸浦`、`東部`、`牛島`，以及依區域推算 `Day1~Day5` 與評分星等文字。
 - `Dockerfile`: 給容器型部署平台使用的設定檔，例如 Railway 會先依照這份檔案建置映像，再使用裡面的 `CMD` 啟動 FastAPI 服務。
 - `Procfile`: 給支援 Procfile 的平台使用的啟動指令，直接告訴平台要如何啟動 Web 服務；如果平台已經使用 `Dockerfile`，通常可以把它視為備用設定。
 - `requirements.txt`: Python 套件依賴清單。

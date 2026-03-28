@@ -26,10 +26,11 @@ def detect_region(address: str) -> str:
     """依地址判斷濟州島區域。
 
     判斷順序大致如下：
-    1. 先看是否命中東部關鍵字。
-    2. 再看是否命中西部關鍵字。
-    3. 再看是否屬於西歸浦。
-    4. 最後判斷是否屬於濟州市。
+    1. 先看是否命中牛島關鍵字。
+    2. 再看是否命中東部關鍵字。
+    3. 再看是否命中西部關鍵字。
+    4. 再看是否屬於西歸浦。
+    5. 最後判斷是否屬於濟州市。
 
     如果完全判斷不出來，預設回傳 `濟州市`，
     避免主流程因為地區未知而中斷。
@@ -37,6 +38,13 @@ def detect_region(address: str) -> str:
     # 沒地址時直接給預設值，讓後續流程仍可繼續。
     if not address:
         return '濟州市'
+
+    # 牛島常見行政區、道路名與多語系關鍵字。
+    # 需要優先判斷，避免先被較大的東部分類吃掉。
+    udo = [
+        '우도면', '우도', '牛島', '牛岛',
+        'udomyeon', 'udobonggil', 'udori', 'udodo', 'udo',
+    ]
 
     # 東部常見行政區與多語系關鍵字。
     # 這裡同時收韓文、中文與英文拼音，提升匹配成功率。
@@ -57,6 +65,11 @@ def detect_region(address: str) -> str:
 
     # 先把整段地址標準化，後面所有比對都盡量用同一格式進行。
     normalized_address = normalize_address_text(address)
+
+    # 先判斷牛島。像 `Udo-myeon`、`Udobong-gil` 都應獨立歸為牛島。
+    for kw in udo:
+        if normalize_address_text(kw) in normalized_address:
+            return '牛島'
 
     # 先判斷東部。只要命中任何一個關鍵字，就直接回傳。
     for kw in east:
