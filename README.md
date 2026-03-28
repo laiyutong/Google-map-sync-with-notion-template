@@ -219,7 +219,9 @@ curl -X POST https://your-app.up.railway.app/save \
 
 ### iPhone
 
-最方便的方式是用「捷徑」接 Google Maps 分享連結，將收到的網址做 URL Encode 後，直接打開：
+最方便的方式是用「捷徑」接 Google Maps 分享連結，將收到的網址做 URL Encode 後，直接打開。
+
+後端會自動清理 iPhone Google Maps 分享常見的追蹤參數，例如 `?g_st=ic`，因此捷徑不需要額外做字串替換：
 
 ```text
 https://your-app.up.railway.app/save-link?url=<URL_ENCODED_GOOGLE_MAPS_LINK>
