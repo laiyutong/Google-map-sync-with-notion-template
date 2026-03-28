@@ -339,6 +339,18 @@ def build_empty_review_summary(message: str) -> dict[str, Any]:
     }
 
 
+def attach_review_metadata(
+    summary: dict[str, Any],
+    *,
+    review_source: str,
+    review_error: str | None = None,
+) -> dict[str, Any]:
+    """補上評論摘要來源與錯誤資訊，方便除錯。"""
+    summary['review_source'] = review_source
+    summary['review_error'] = review_error
+    return summary
+
+
 def sanitize_reviews_for_summary(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """整理評論內容，避免模型收到空白或過長資料。"""
     sanitized_reviews: list[dict[str, Any]] = []
@@ -727,9 +739,13 @@ async def summarize_reviews_with_azure(
 
     if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_API_KEY:
         fallback_summary = build_review_summary_fallback(sanitized_reviews)
-        return normalize_review_summary(
-            fallback_summary,
-            '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+        return attach_review_metadata(
+            normalize_review_summary(
+                fallback_summary,
+                '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+            ),
+            review_source='azure_fallback_not_configured',
+            review_error='未設定 AZURE_OPENAI_ENDPOINT 或 AZURE_OPENAI_API_KEY',
         )
 
     payload = {
@@ -776,9 +792,13 @@ async def summarize_reviews_with_azure(
         except httpx.HTTPError as exc:
             print(f'⚠️ Azure OpenAI 摘要失敗：{exc}')
             fallback_summary = build_review_summary_fallback(sanitized_reviews)
-            return normalize_review_summary(
-                fallback_summary,
-                '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+            return attach_review_metadata(
+                normalize_review_summary(
+                    fallback_summary,
+                    '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+                ),
+                review_source='azure_fallback_http_error',
+                review_error=str(exc),
             )
 
     try:
@@ -788,19 +808,30 @@ async def summarize_reviews_with_azure(
     except (KeyError, TypeError, IndexError, ValueError, json.JSONDecodeError) as exc:
         print(f'⚠️ Azure OpenAI 回傳格式異常：{exc}')
         fallback_summary = build_review_summary_fallback(sanitized_reviews)
-        return normalize_review_summary(
-            fallback_summary,
-            '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+        return attach_review_metadata(
+            normalize_review_summary(
+                fallback_summary,
+                '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+            ),
+            review_source='azure_fallback_parse_error',
+            review_error=str(exc),
         )
     except Exception as exc:
         print(f'⚠️ Azure OpenAI 摘要處理失敗：{exc}')
         fallback_summary = build_review_summary_fallback(sanitized_reviews)
-        return normalize_review_summary(
-            fallback_summary,
-            '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+        return attach_review_metadata(
+            normalize_review_summary(
+                fallback_summary,
+                '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+            ),
+            review_source='azure_fallback_unknown_error',
+            review_error=str(exc),
         )
 
-    return normalize_review_summary(summary, '已成功抓取評論，但摘要內容不足。')
+    return attach_review_metadata(
+        normalize_review_summary(summary, '已成功抓取評論，但摘要內容不足。'),
+        review_source='azure_openai',
+    )
 
 
 async def build_review_summary(place_name: str, map_url: str) -> dict[str, Any]:
@@ -808,7 +839,11 @@ async def build_review_summary(place_name: str, map_url: str) -> dict[str, Any]:
     reviews = await scrape_google_maps_reviews(map_url, REVIEW_LIMIT)
     summary = await summarize_reviews_with_azure(place_name, reviews)
     summary['review_count'] = len(reviews)
-    summary['review_source'] = 'google_maps_playwright'
+    summary['review_source'] = (
+        'google_maps_playwright'
+        if summary.get('review_source') == 'azure_openai'
+        else f'google_maps_playwright/{summary.get("review_source")}'
+    )
     return summary
 
 
@@ -824,32 +859,41 @@ async def build_review_summary_with_fallback(
         fallback_reviews = place.get('reviews', [])
         if not fallback_reviews:
             print(f'⚠️ 評論 fallback 無可用評論：{exc.detail}')
-            summary = build_empty_review_summary('目前抓不到可分析的評論。')
+            summary = attach_review_metadata(
+                build_empty_review_summary('目前抓不到可分析的評論。'),
+                review_source='no_reviews_available',
+                review_error=exc.detail,
+            )
             summary['review_count'] = 0
-            summary['review_source'] = 'no_reviews_available'
             return summary
 
         print(f'⚠️ 改用 Places API reviews fallback：{exc.detail}')
         summary = await summarize_reviews_with_azure(place_name, fallback_reviews)
         summary['review_count'] = len(fallback_reviews)
-        summary['review_source'] = 'places_api_fallback'
+        summary['review_source'] = f'places_api_fallback/{summary.get("review_source")}'
+        summary['review_error'] = exc.detail
         return summary
     except Exception as exc:
         print(f'⚠️ 評論摘要非預期錯誤：{exc}')
         fallback_reviews = sanitize_reviews_for_summary(place.get('reviews', []))
         if fallback_reviews:
-            summary = build_review_summary_fallback(fallback_reviews)
-            summary = normalize_review_summary(
-                summary,
-                '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+            summary = attach_review_metadata(
+                normalize_review_summary(
+                    build_review_summary_fallback(fallback_reviews),
+                    '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+                ),
+                review_source='places_api_fallback_after_error',
+                review_error=str(exc),
             )
             summary['review_count'] = len(fallback_reviews)
-            summary['review_source'] = 'places_api_fallback_after_error'
             return summary
 
-        summary = build_empty_review_summary('評論摘要流程失敗，請稍後再試。')
+        summary = attach_review_metadata(
+            build_empty_review_summary('評論摘要流程失敗，請稍後再試。'),
+            review_source='summary_error',
+            review_error=str(exc),
+        )
         summary['review_count'] = 0
-        summary['review_source'] = 'summary_error'
         return summary
 
 
@@ -1276,6 +1320,8 @@ def build_preview_payload(
         'google_maps_url': place.get('google_maps_url') or source_url,
         'data_source': place.get('data_source'),
         'review_count': (review_summary or {}).get('review_count', 0),
+        'review_source': (review_summary or {}).get('review_source'),
+        'review_error': (review_summary or {}).get('review_error'),
         'review_summary': (
             {
                 'overall_summary': (review_summary or {}).get('overall_summary', []),
