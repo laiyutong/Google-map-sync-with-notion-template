@@ -196,6 +196,12 @@ def extract_coordinates(url: str) -> tuple[float, float] | None:
     return float(match.group(1)), float(match.group(2))
 
 
+def normalize_address_text(address: str) -> str:
+    """將地址正規化，方便比對英文與中韓文地名。"""
+    lowered = address.lower()
+    return re.sub(r'[\s,./()-]+', '', lowered)
+
+
 # 依地址判斷濟州島區域
 def detect_region(address: str) -> str:
     if not address:
@@ -204,25 +210,40 @@ def detect_region(address: str) -> str:
     east = [
         '성산읍', '표선면', '남원읍', '구좌읍', '조천읍',
         '성산', '표선', '남원', '城山', '表善', '南元', '旧左', '朝天',
+        'seongsaneup', 'seongsan', 'pyoseonmyeon', 'pyoseon',
+        'namwoneup', 'namwon', 'gujwaeup', 'gujwa', 'jocheoneup', 'jocheon',
     ]
     west = [
         '한림읍', '한경면', '애월읍', '대정읍', '안덕면',
         '한림', '한경', '애월', '대정', '안덕', '翰林', '翰京', '涯月', '大静', '安德',
+        'hallimeup', 'hallim', 'hangyeongmyeon', 'hangyeong',
+        'aewoleup', 'aewol', 'daejeongeup', 'daejeong', 'andeokmyeon', 'andeok',
     ]
+    normalized_address = normalize_address_text(address)
 
     for kw in east:
-        if kw in address:
+        if normalize_address_text(kw) in normalized_address:
             return '東部'
     for kw in west:
-        if kw in address:
+        if normalize_address_text(kw) in normalized_address:
             return '西部'
     if (
         '서귀포시' in address
         or '서귀포' in address
         or '西歸浦' in address
         or '西归浦' in address
+        or 'seogwiposi' in normalized_address
+        or 'seogwipo' in normalized_address
     ):
         return '西歸浦'
+    if (
+        '제주시' in address
+        or '濟州市' in address
+        or '济州市' in address
+        or 'jejusi' in normalized_address
+        or 'jejucity' in normalized_address
+    ):
+        return '濟州市'
 
     return '濟州市'
 

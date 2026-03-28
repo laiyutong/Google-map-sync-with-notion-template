@@ -235,26 +235,30 @@ https://your-app.up.railway.app/save-preview-link?url=https%3A%2F%2Fmaps.app.goo
 
 #### iPhone 快捷指令設定
 
-可在 iPhone 的「捷徑」App 建立一個名為 `存到 Notion 地圖` 的捷徑，流程如下：
+如果你希望送出後留在捷徑內顯示結果、不跳到 Safari，可依下列流程設定：
 
 1. 新增捷徑，點右上角 `i`，開啟「在分享表單中顯示」。
-2. 在「接受的內容」只勾選 `URL` 與 `Safari 網頁`。
-3. 加入 `取得輸入內容` 動作，接收分享進來的 Google Maps 連結。
-4. 加入 `URL 編碼` 動作，將輸入內容轉成可放進 query string 的格式。
-5. 加入 `文字` 動作，內容填入：
+2. 在「接受的內容」只勾選 `URL`。
+3. 加入 `從輸入取得 URL` 動作，接收 Google Maps 分享連結。
+4. 加入 `URL 編碼` 動作，輸入選上一步的 `URL`。
+5. 可選：加入 `取代文字` 動作，使用常規表示式將 `\?g_st=.*` 取代成空字串。
+6. 加入 `文字` 動作，內容填入：
 
 ```text
-https://your-app.up.railway.app/save-link?url=[已編碼的文字]
+https://your-app.up.railway.app/save-link?url=[更新的文字]
 ```
 
-6. 加入 `打開 URL` 動作，打開上一步組出的網址。
+如果你不需要第 5 步，這裡也可以直接接 `[URL 編碼文字]`。
 
-完成後，在 Google Maps 按 `分享`，選擇這個捷徑即可直接呼叫雲端 endpoint。
+7. 加入 `取得網址內容` 動作，輸入選上一步的 `文字`。
+8. 加入 `顯示` 或 `快速查看` 動作，顯示上一步回傳內容。
 
-如果你想先檢查結果、不直接寫入 Notion，將第 5 步改成：
+完成後，在 Google Maps 按 `分享`，選擇這個捷徑即可直接看到 API 回傳結果。
+
+如果你想先檢查資料、不直接寫入 Notion，將第 6 步改成：
 
 ```text
-https://your-app.up.railway.app/save-preview-link?url=[已編碼的文字]
+https://your-app.up.railway.app/save-preview-link?url=[更新的文字]
 ```
 
 ## 疑難排解
