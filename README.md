@@ -23,7 +23,7 @@
 - 支援文章搜尋補充參考資料
 - 提供預覽 API，寫入前可先檢查資料
 
-## 技術棧
+## Tech Stack
 
 - Python 3.10+
 - FastAPI
@@ -169,7 +169,9 @@ curl "http://127.0.0.1:3000/save-link?url=https%3A%2F%2Fmaps.app.goo.gl%2Fyour-s
 
 ### 1. 建立專案
 
-將此專案推到 GitHub 後，在 Railway 建立新專案並選擇該 repository。
+將此專案推到 GitHub 後，到 Railway 建立新專案並選擇該 repository：
+
+`https://railway.com/new`
 
 ### 2. 設定環境變數
 
@@ -186,6 +188,8 @@ curl "http://127.0.0.1:3000/save-link?url=https%3A%2F%2Fmaps.app.goo.gl%2Fyour-s
 ### 3. 部署
 
 Railway 偵測到 `Dockerfile` 後會自動建置並啟動服務。
+
+若你自行調整 Dockerfile，建議避免把不同基底映像建立出的 `venv` 直接跨 stage 複製到 runtime，否則可能出現 `No module named playwright` 這類相依套件找不到的錯誤。
 
 部署成功後，可先用以下網址確認：
 
