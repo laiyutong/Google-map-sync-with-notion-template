@@ -1,4 +1,4 @@
-# maps-to-notion
+# Google Maps save to Notion Pages
 
 將 Google Maps 分享連結轉成可寫入 Notion 的景點資料。
 
