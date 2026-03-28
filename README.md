@@ -159,6 +159,8 @@ curl "http://127.0.0.1:3000/save-link?url=https%3A%2F%2Fmaps.app.goo.gl%2Fyour-s
 - `日程`
 - `Google Map`
 - `評分`
+- `經度(lng)`
+- `緯度(lat)`
 
 ## Railway 部署
 

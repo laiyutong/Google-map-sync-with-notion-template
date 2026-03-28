@@ -27,6 +27,7 @@ GOOGLE_PLACES_FIELD_MASK = (
     'places.id,'
     'places.displayName,'
     'places.formattedAddress,'
+    'places.location,'
     'places.rating,'
     'places.googleMapsUri,'
     'places.regularOpeningHours.weekdayDescriptions,'
@@ -512,6 +513,8 @@ async def try_google_places_lookup(place_name: str) -> dict[str, Any] | None:
         return {
             'name': place.get('displayName', {}).get('text', place_name),
             'formatted_address': place.get('formattedAddress', ''),
+            'latitude': place.get('location', {}).get('latitude'),
+            'longitude': place.get('location', {}).get('longitude'),
             'opening_hours': {
                 'weekday_text': (
                     place.get('regularOpeningHours', {}).get('weekdayDescriptions', [])
@@ -561,6 +564,8 @@ async def get_place_details(place_name: str, expanded_url: str) -> dict[str, Any
         return {
             'name': place_name,
             'formatted_address': '',
+            'latitude': None,
+            'longitude': None,
             'opening_hours': {},
             'photo_url': None,
             'photo_name': None,
@@ -577,6 +582,8 @@ async def get_place_details(place_name: str, expanded_url: str) -> dict[str, Any
     return {
         'name': place_name,
         'formatted_address': address,
+        'latitude': lat,
+        'longitude': lng,
         'opening_hours': {},
         'photo_url': None,
         'photo_name': None,
@@ -1015,6 +1022,23 @@ def build_database_properties(
         }
     }
 
+    def assign_coordinate_property(property_name: str, value: float | None) -> None:
+        """依欄位型別寫入經緯度。"""
+        if value is None:
+            return
+
+        property_schema = schema.get(property_name)
+        if not property_schema:
+            return
+
+        property_type = property_schema.get('type')
+        if property_type == 'number':
+            properties[property_name] = {'number': value}
+        elif property_type == 'rich_text':
+            properties[property_name] = {'rich_text': [{'text': {'content': str(value)}}]}
+        elif property_type == 'title':
+            properties[property_name] = {'title': [{'text': {'content': str(value)}}]}
+
     day_name = detect_day(region)
 
     category_schema = schema.get('分類')
@@ -1046,6 +1070,9 @@ def build_database_properties(
             properties['評分'] = {'multi_select': [{'name': rating_text}]}
         elif rating_type == 'select':
             properties['評分'] = {'select': {'name': rating_text}}
+
+    assign_coordinate_property('經度(lng)', place.get('longitude'))
+    assign_coordinate_property('緯度(lat)', place.get('latitude'))
 
     return properties
 
@@ -1178,6 +1205,8 @@ def build_preview_payload(
         'photo_url': place.get('photo_url'),
         'photo_name': place.get('photo_name'),
         'photo_content_type': place.get('photo_content_type'),
+        'latitude': place.get('latitude'),
+        'longitude': place.get('longitude'),
         'opening_hours': hours_lines,
         'google_maps_url': place.get('google_maps_url') or source_url,
         'data_source': place.get('data_source'),
