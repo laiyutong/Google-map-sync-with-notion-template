@@ -83,6 +83,7 @@ GOOGLE_PLACES_API_KEY=你的_google_places_api_key
 ```env
 NOTION_TOKEN=你的_notion_integration_token
 ```
+![Notion建立integration畫面](./images/notion-Internal-integrations.png)
 
 #### 2-2. 將 Integration 授權給目標頁面或資料庫
 
@@ -97,7 +98,7 @@ NOTION_TOKEN=你的_notion_integration_token
 
 如果沒有做這一步，程式即使有 `NOTION_TOKEN`，也會因為沒有權限而無法寫入。
 
-![Notion建立connection畫面](./images/notion-Internal-integrations.png)
+![Notion建立connection畫面](./images/notion-connection.png)
 
 #### 2-3. 取得 Database ID 或 Page ID
 
