@@ -8,7 +8,7 @@
 2. 解析景點名稱與座標。
 3. 優先用 Google Places API 補齊地址、評分、照片與評論。
 4. 必要時用 OpenStreetMap 反查地址。
-5. 使用 Playwright 抓取 Google Maps 最新評論。
+5. 使用 Google Places API reviews 作為評論來源。
 6. 使用 Azure OpenAI 將評論整理成繁體中文摘要。
 7. 搜尋相關介紹文章。
 8. 將資料寫入 Notion Database 或指定頁面底下。
@@ -19,7 +19,7 @@
 - 支援 `Notion` Database 與 Page 兩種寫入模式
 - 自動依地址判斷區域與行程天數
 - 支援 Google Places 圖片與評分同步
-- 支援 Google Maps 評論抓取與摘要
+- 支援 Places API 評論摘要整理
 - 支援文章搜尋補充參考資料
 - 提供預覽 API，寫入前可先檢查資料
 
@@ -30,7 +30,6 @@
 - Uvicorn
 - httpx
 - notion-client
-- Playwright
 - python-dotenv
 
 ## 專案結構
@@ -66,7 +65,6 @@ cp .env.example .env
 - `PORT`: 本機或部署時使用的連接埠，預設 `3000`
 - `AZURE_OPENAI_ENDPOINT`: Azure OpenAI Chat Completions Endpoint
 - `AZURE_OPENAI_API_KEY`: Azure OpenAI API Key
-- `PLAYWRIGHT_BROWSERS_PATH`: Playwright 瀏覽器安裝路徑，建議維持 `0`
 
 ## 本機啟動
 
@@ -76,11 +74,8 @@ cp .env.example .env
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-python -m playwright install chromium
 uvicorn main:app --reload --port 3000
 ```
-
-若更新了 `playwright` 套件版本，請重新執行一次 `python -m playwright install chromium`，避免套件版本與瀏覽器執行檔不一致。
 
 啟動後可用以下網址確認服務狀態：
 
@@ -185,13 +180,10 @@ curl "http://127.0.0.1:3000/save-link?url=https%3A%2F%2Fmaps.app.goo.gl%2Fyour-s
 - `NOTION_TARGET_NAME`
 - `AZURE_OPENAI_ENDPOINT`
 - `AZURE_OPENAI_API_KEY`
-- `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`
 
 ### 3. 部署
 
 Railway 偵測到 `Dockerfile` 後會自動建置並啟動服務。
-
-若你自行調整 Dockerfile，建議避免把不同基底映像建立出的 `venv` 直接跨 stage 複製到 runtime，否則可能出現 `No module named playwright` 這類相依套件找不到的錯誤。
 
 部署成功後，可先用以下網址確認：
 
@@ -267,10 +259,8 @@ https://your-app.up.railway.app/save-preview-link?url=[已編碼的文字]
 
 ## 注意事項
 
-- `Playwright` 需要額外安裝瀏覽器，否則評論抓取會失敗
-- Railway 首次部署或重新建置時，會花一些時間安裝 Chromium
+- 評論摘要目前固定使用 Google Places API reviews，不再依賴瀏覽器自動化
 - 若未設定 Azure OpenAI，系統會退回基本評論摘要
-- 若 Google Maps 評論抓取失敗，系統會嘗試改用 Places API reviews
 - `NOTION_TOKEN` 對應的 integration 必須已分享到目標 Notion 頁面或資料庫
 
 ## 後續建議

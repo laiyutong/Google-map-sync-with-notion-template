@@ -13,7 +13,6 @@ from notion_client.errors import APIResponseError
 from pydantic import BaseModel
 
 load_dotenv()
-os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", "0")
 
 app = FastAPI()
 notion = Client(auth=os.environ["NOTION_TOKEN"])
@@ -568,152 +567,6 @@ async def get_place_details(place_name: str, expanded_url: str) -> dict[str, Any
     }
 
 
-async def click_google_maps_button(page: Any, keywords: list[str]) -> bool:
-    """依按鈕文字或 aria-label 關鍵字點擊 Google Maps 按鈕。"""
-    buttons = page.locator('button')
-    count = await buttons.count()
-    for index in range(min(count, 80)):
-        button = buttons.nth(index)
-        try:
-            aria_label = (await button.get_attribute('aria-label') or '').strip()
-            text = (await button.inner_text() or '').strip()
-        except Exception:
-            continue
-
-        combined = f'{aria_label} {text}'.lower()
-        if any(keyword in combined for keyword in keywords):
-            try:
-                await button.click()
-                return True
-            except Exception:
-                continue
-
-    return False
-
-
-async def expand_visible_review_cards(review_feed: Any) -> None:
-    """展開目前畫面內可見的完整評論。"""
-    buttons = review_feed.locator('button')
-    count = await buttons.count()
-    for index in range(min(count, 50)):
-        button = buttons.nth(index)
-        try:
-            aria_label = (await button.get_attribute('aria-label') or '').lower()
-            text = (await button.inner_text() or '').lower()
-        except Exception:
-            continue
-
-        if any(keyword in f'{aria_label} {text}' for keyword in ['更多', 'more', '자세히']):
-            try:
-                await button.click()
-            except Exception:
-                continue
-
-
-async def collect_reviews_from_feed(review_feed: Any) -> list[dict[str, Any]]:
-    """從 Google Maps 評論清單提取星等與原文。"""
-    cards = review_feed.locator('[data-review-id]')
-    count = await cards.count()
-    reviews: list[dict[str, Any]] = []
-
-    for index in range(count):
-        card = cards.nth(index)
-        try:
-            review_id = await card.get_attribute('data-review-id')
-        except Exception:
-            review_id = None
-
-        star_label = ''
-        for selector in ['span[aria-label*="stars"]', 'span[aria-label*="顆星"]', 'span[aria-label*="별점"]']:
-            locator = card.locator(selector).first
-            if await locator.count():
-                star_label = (await locator.get_attribute('aria-label') or '').strip()
-                if star_label:
-                    break
-
-        text = ''
-        for selector in ['span.wiI7pd', 'span.MyEned', 'div.MyEned', 'div.wiI7pd']:
-            locator = card.locator(selector).first
-            if await locator.count():
-                text = (await locator.inner_text() or '').strip()
-                if text:
-                    break
-
-        if not text:
-            continue
-
-        reviews.append(
-            {
-                'review_id': review_id,
-                'stars': extract_star_rating(star_label),
-                'text': text,
-            }
-        )
-
-    return reviews
-
-
-async def scrape_google_maps_reviews(map_url: str, limit: int = REVIEW_LIMIT) -> list[dict[str, Any]]:
-    """使用 Playwright 抓取 Google Maps 最新評論。"""
-    try:
-        from playwright.async_api import TimeoutError as PlaywrightTimeoutError
-        from playwright.async_api import async_playwright
-    except ModuleNotFoundError as exc:
-        raise HTTPException(status_code=500, detail='目前執行環境尚未安裝 Playwright') from exc
-
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=True)
-        context = await browser.new_context(locale='zh-TW')
-        page = await context.new_page()
-
-        try:
-            await page.goto(map_url, wait_until='domcontentloaded', timeout=60000)
-            await page.wait_for_timeout(3000)
-
-            opened_reviews = await click_google_maps_button(page, ['則評論', 'reviews', '리뷰'])
-            if not opened_reviews:
-                raise HTTPException(status_code=502, detail='無法開啟 Google Maps 評論視窗')
-
-            review_feed = page.locator('div[role="feed"]').first
-            await review_feed.wait_for(timeout=15000)
-
-            sort_clicked = await click_google_maps_button(page, ['排序評論', 'sort reviews', '리뷰 정렬'])
-            if sort_clicked:
-                await page.wait_for_timeout(1000)
-                await click_google_maps_button(page, ['最新', 'newest', '최신'])
-                await page.wait_for_timeout(2000)
-
-            unique_reviews: dict[str, dict[str, Any]] = {}
-            stable_rounds = 0
-            last_count = 0
-
-            while len(unique_reviews) < limit and stable_rounds < 8:
-                await expand_visible_review_cards(review_feed)
-                for review in await collect_reviews_from_feed(review_feed):
-                    review_key = review.get('review_id') or review['text']
-                    unique_reviews[review_key] = review
-
-                if len(unique_reviews) == last_count:
-                    stable_rounds += 1
-                else:
-                    stable_rounds = 0
-                    last_count = len(unique_reviews)
-
-                await review_feed.evaluate('(node) => { node.scrollBy(0, node.scrollHeight); }')
-                await page.wait_for_timeout(1800)
-
-            ordered_reviews = list(unique_reviews.values())[:limit]
-            return [
-                {'stars': review.get('stars'), 'text': review['text']}
-                for review in ordered_reviews
-            ]
-        except PlaywrightTimeoutError as exc:
-            raise HTTPException(status_code=504, detail='抓取 Google Maps 評論逾時') from exc
-        finally:
-            await context.close()
-            await browser.close()
-
-
 def build_review_summary_fallback(reviews: list[dict[str, Any]]) -> dict[str, Any]:
     """當模型不可用時，提供最基本的評論摘要。"""
     if not reviews:
@@ -834,45 +687,32 @@ async def summarize_reviews_with_azure(
     )
 
 
-async def build_review_summary(place_name: str, map_url: str) -> dict[str, Any]:
-    """整合評論抓取與摘要流程。"""
-    reviews = await scrape_google_maps_reviews(map_url, REVIEW_LIMIT)
-    summary = await summarize_reviews_with_azure(place_name, reviews)
-    summary['review_count'] = len(reviews)
-    summary['review_source'] = (
-        'google_maps_playwright'
-        if summary.get('review_source') == 'azure_openai'
-        else f'google_maps_playwright/{summary.get("review_source")}'
-    )
+async def build_review_summary(place_name: str, reviews: list[dict[str, Any]]) -> dict[str, Any]:
+    """使用 Places API reviews 與 Azure OpenAI 產出摘要。"""
+    sanitized_reviews = sanitize_reviews_for_summary(reviews)[:REVIEW_LIMIT]
+    if not sanitized_reviews:
+        summary = attach_review_metadata(
+            build_empty_review_summary('目前抓不到可分析的評論。'),
+            review_source='no_reviews_available',
+            review_error='Places API 沒有可用評論',
+        )
+        summary['review_count'] = 0
+        return summary
+
+    summary = await summarize_reviews_with_azure(place_name, sanitized_reviews)
+    summary['review_count'] = len(sanitized_reviews)
+    summary['review_source'] = f'google_places_reviews/{summary.get("review_source")}'
+    summary['review_error'] = None
     return summary
 
 
-async def build_review_summary_with_fallback(
+async def build_review_summary_from_place(
     place_name: str,
-    map_url: str,
     place: dict[str, Any],
 ) -> dict[str, Any]:
-    """優先抓 Google Maps 最新評論，失敗時退回 Places API reviews。"""
+    """固定使用 Places API reviews 整理評論摘要。"""
     try:
-        return await build_review_summary(place_name, map_url)
-    except HTTPException as exc:
-        fallback_reviews = place.get('reviews', [])
-        if not fallback_reviews:
-            print(f'⚠️ 評論 fallback 無可用評論：{exc.detail}')
-            summary = attach_review_metadata(
-                build_empty_review_summary('目前抓不到可分析的評論。'),
-                review_source='no_reviews_available',
-                review_error=exc.detail,
-            )
-            summary['review_count'] = 0
-            return summary
-
-        print(f'⚠️ 改用 Places API reviews fallback：{exc.detail}')
-        summary = await summarize_reviews_with_azure(place_name, fallback_reviews)
-        summary['review_count'] = len(fallback_reviews)
-        summary['review_source'] = f'places_api_fallback/{summary.get("review_source")}'
-        summary['review_error'] = exc.detail
-        return summary
+        return await build_review_summary(place_name, place.get('reviews', []))
     except Exception as exc:
         print(f'⚠️ 評論摘要非預期錯誤：{exc}')
         fallback_reviews = sanitize_reviews_for_summary(place.get('reviews', []))
@@ -882,16 +722,16 @@ async def build_review_summary_with_fallback(
                     build_review_summary_fallback(fallback_reviews),
                     '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
                 ),
-                review_source='places_api_fallback_after_error',
+                review_source='google_places_reviews/fallback_after_error',
                 review_error=str(exc),
             )
             summary['review_count'] = len(fallback_reviews)
             return summary
 
         summary = attach_review_metadata(
-            build_empty_review_summary('評論摘要流程失敗，請稍後再試。'),
-            review_source='summary_error',
-            review_error=str(exc),
+            build_empty_review_summary('目前抓不到可分析的評論。'),
+            review_source='no_reviews_available',
+            review_error='Places API 沒有可用評論',
         )
         summary['review_count'] = 0
         return summary
@@ -1346,16 +1186,15 @@ async def collect_enriched_place_data(
 ]:
     """集中處理預覽與寫入共用的景點補充流程。"""
     expanded_url, place_name, place, region, day = await resolve_place_from_url(source_url)
-    map_url = place.get('google_maps_url') or expanded_url
     review_summary: dict[str, Any] | None = None
     related_articles: list[dict[str, str]] = []
 
     try:
-        review_summary = await build_review_summary_with_fallback(place_name, map_url, place)
+        review_summary = await build_review_summary_from_place(place_name, place)
     except HTTPException as exc:
-        print(f'⚠️ 評論抓取失敗：{exc.detail}')
+        print(f'⚠️ 評論摘要失敗：{exc.detail}')
     except Exception as exc:
-        print(f'⚠️ 評論流程失敗：{exc}')
+        print(f'⚠️ 評論摘要流程失敗：{exc}')
 
     try:
         related_articles = await search_related_articles(place_name)

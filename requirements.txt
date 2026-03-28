@@ -3,4 +3,3 @@ uvicorn
 httpx
 python-dotenv
 notion-client
-playwright==1.58.0
