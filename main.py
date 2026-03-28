@@ -108,6 +108,22 @@ def normalize_google_maps_share_url(raw_url: str) -> str:
     )
 
 
+def normalize_place_candidate(raw_value: str) -> str | None:
+    """將 URL 中可能的地點名稱片段清理成可搜尋文字。"""
+    decoded_value = unquote(raw_value or '').replace('+', ' ').strip()
+    if not decoded_value:
+        return None
+
+    compact_value = re.sub(r'\s+', ' ', decoded_value)
+    if compact_value.startswith(('http://', 'https://')):
+        return None
+
+    if re.fullmatch(r'-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?', compact_value):
+        return None
+
+    return compact_value
+
+
 # 展開短網址
 async def expand_url(short_url: str) -> str:
     """展開 Google Maps 分享短網址。"""
@@ -127,11 +143,38 @@ async def expand_url(short_url: str) -> str:
 
 # 從展開的 URL 解析店名
 def extract_place_name(url: str) -> str | None:
-    """從 Google Maps 路徑提取店名。"""
-    decoded = unquote(httpx.URL(url).path)
-    match = re.search(r'/maps/place/([^/@?]+)', decoded)
-    if match:
-        return match.group(1).replace('+', ' ')
+    """從多種 Google Maps URL 型態提取店名。"""
+    parsed = urlparse(url)
+    decoded_path = unquote(parsed.path)
+
+    path_patterns = [
+        r'/maps/place/([^/@?]+)',
+        r'/place/([^/@?]+)',
+        r'/maps/search/([^/@?]+)',
+        r'/search/([^/@?]+)',
+    ]
+    for pattern in path_patterns:
+        match = re.search(pattern, decoded_path)
+        if not match:
+            continue
+
+        candidate = normalize_place_candidate(match.group(1))
+        if candidate:
+            return candidate
+
+    query = parse_qs(parsed.query)
+    for key in ('q', 'query', 'destination'):
+        for raw_value in query.get(key, []):
+            candidate = normalize_place_candidate(raw_value)
+            if candidate:
+                return candidate
+
+    path_segments = [segment for segment in decoded_path.split('/') if segment]
+    if path_segments:
+        candidate = normalize_place_candidate(path_segments[-1])
+        if candidate and candidate.lower() not in {'maps', 'place', 'search'}:
+            return candidate
+
     return None
 
 
@@ -1056,7 +1099,10 @@ async def resolve_place_from_url(url: str) -> tuple[str, str, dict[str, Any], st
 
     place_name = extract_place_name(expanded_url)
     if not place_name:
-        raise HTTPException(status_code=400, detail='無法從 URL 解析店名')
+        if extract_coordinates(expanded_url):
+            place_name = 'Google Maps 地點'
+        else:
+            raise HTTPException(status_code=400, detail='無法從 URL 解析店名')
 
     print(f'🏪 店名：{place_name}')
     place = await get_place_details(place_name, expanded_url)
