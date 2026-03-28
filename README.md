@@ -32,6 +32,137 @@
 - notion-client
 - python-dotenv
 
+## 前置準備
+
+在本機啟動或部署這個專案前，請先準備以下 2 組外部服務憑證：
+
+1. `Google Places API Key`
+2. `Notion Token` 與 `NOTION_DATABASE_ID`
+
+### 1. 取得 Google Places API Key
+
+此專案會使用 Google Places API 查詢景點名稱、地址、評分、照片與評論，因此必須先建立一組可用的 API Key。
+
+操作步驟如下：
+
+1. 前往 [console.cloud.google.com](https://console.cloud.google.com/)
+2. 建立新專案（隨便命名，例如 `maps-to-notion`）
+3. 左側選單 -> **API 和服務** -> **程式庫**
+4. 搜尋 `Places API` -> 啟用
+5. 左側 -> **憑證** -> **建立憑證** -> **API 金鑰**
+
+建議補充設定：
+
+- 到 API Key 的限制頁面，設定可使用的 API 範圍，避免金鑰被濫用。
+- 若之後要部署到雲端，也建議限制 HTTP referrer、IP 或應用程式來源。
+- 若 API 尚未啟用計費，Google Cloud 可能會拒絕部分 Places 功能。
+
+最後請把金鑰填到 `.env`：
+
+```env
+GOOGLE_PLACES_API_KEY=你的_google_places_api_key
+```
+
+### 2. 取得 Notion Token 和 Database ID
+
+此專案會把整理好的景點資料寫入 Notion，因此需要：
+
+- 一組 `Notion Integration Token`
+- 一個目標頁面的 `Database ID` 或 `Page ID`
+
+#### 2-1. 建立 Notion Integration 並取得 Token
+
+1. 打開 Notion integrations 頁面：[Notion Integrations](https://www.notion.so/profile/integrations/internal)
+2. 點擊 `New integration`。
+3. 輸入 integration 名稱，例如 `maps-to-notion`。
+4. 選擇你要使用的 workspace。
+5. 建立完成後，複製 `Internal Integration Token`。
+
+請把它填到 `.env`：
+
+```env
+NOTION_TOKEN=你的_notion_integration_token
+```
+
+#### 2-2. 將 Integration 授權給目標頁面或資料庫
+
+只建立 integration 還不夠，還要把它分享到你真正要寫入的 Notion 頁面或資料庫。
+
+操作方式：
+
+1. 打開你要寫入的 Notion Database，或該 Database 所在的父頁面。
+2. 點右上角 `．．．`。
+3. 在`connection`中搜尋你剛建立的 integration 名稱。
+4. 將它加入，讓這個 integration 有權限讀寫該頁面或資料庫。
+
+如果沒有做這一步，程式即使有 `NOTION_TOKEN`，也會因為沒有權限而無法寫入。
+
+![Notion建立connection畫面](./images/notion-Internal-integrations.png)
+
+#### 2-3. 取得 Database ID 或 Page ID
+
+這個專案的 `NOTION_DATABASE_ID` 可以填：
+
+- Notion Database 的 ID
+- 或一個 Notion Page 的 ID
+
+兩種模式差異如下：
+
+- 如果填的是 `Database ID`，程式會建立一筆資料列。
+- 如果填的是 `Page ID`，程式會在該頁底下建立子頁。
+
+取得方式：
+
+1. 打開目標 Database 或 Page。
+2. 從瀏覽器網址列複製該頁網址。
+3. 找出網址最後那段長字串 ID。
+
+常見格式範例：
+
+```text
+https://www.notion.so/workspace/Trip-Plan-1234567890abcdef1234567890abcdef
+```
+
+上面最後的：
+
+```text
+1234567890abcdef1234567890abcdef
+```
+
+就是你要填入的頁面或資料庫 ID。
+
+請把它填到 `.env`：
+
+```env
+NOTION_DATABASE_ID=你的_notion_database_id_或_page_id
+```
+
+#### 2-4. 可選設定：指定要寫入的 Data Source 名稱
+
+如果你的 Notion Database 下面有多個 data source，或你想指定特定名稱的目標資料來源，可以額外設定：
+
+```env
+NOTION_TARGET_NAME=行程安排
+```
+
+這個值預設就是 `行程安排`，通常不改也可以；只有當你的 Notion 結構名稱不同時，才需要手動調整。
+
+### 3. 建議先完成 `.env` 設定
+
+你可以先複製範例檔，再把上面取得的值填入：
+
+```bash
+cp .env.example .env
+```
+
+至少要先填好：
+
+```env
+GOOGLE_PLACES_API_KEY=...
+NOTION_TOKEN=...
+NOTION_DATABASE_ID=...
+```
+
 ## 專案結構
 
 ```text
