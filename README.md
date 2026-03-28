@@ -34,7 +34,7 @@
 
 ## 前置準備
 
-在本機啟動或部署這個專案前，請先準備以下 2 組外部服務憑證：
+在本機啟動或部署這個專案前，請先準備以下：
 
 1. `Google Places API Key`
 2. `Notion Token` 與 `NOTION_DATABASE_ID`
