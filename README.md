@@ -2,7 +2,7 @@
 
 將 Google Maps 分享連結轉成可寫入 Notion 的景點資料。
 
-此專案提供一個 `FastAPI` API，會自動完成以下流程：
+此專案提供一個以 `FastAPI` 實作的服務，會自動完成以下流程：
 
 1. 展開 Google Maps 短網址。
 2. 解析景點名稱與座標。
@@ -52,6 +52,24 @@
 └── .env.example
 ```
 
+## 檔案與資料夾作用
+
+- `main.py`: 專案最外層的啟動入口。這個檔案本身不放商業邏輯，主要是保留給 `uvicorn main:app`、`Procfile` 與部署平台直接啟動 API 使用。
+- `app/main.py`: FastAPI 的主要 route 定義所在。這裡負責接收 `/save`、`/save-preview` 等請求，呼叫各個 service，最後組成 API 回傳格式。
+- `app/config.py`: 集中管理環境變數、常數與共用 client，例如 `GOOGLE_PLACES_API_KEY`、`AZURE_OPENAI_ENDPOINT`、`NOTION_TOKEN`、`HTTP_TIMEOUT` 與 Notion client，避免分散在各個檔案裡。
+- `app/schemas/requests.py`: 定義 API 請求資料格式。目前主要用來描述 `SaveRequest`，也就是 API 需要接收一個 `url` 字串欄位。
+- `app/services/maps.py`: 處理 Google Maps 分享連結相關邏輯，例如展開短網址、清理分享參數、解析店名與座標，並將網址轉成後續 service 可使用的地點資訊。
+- `app/services/places.py`: 專門和 Google Places API 溝通。負責查詢地點資料、取得照片、地址、評論與經緯度，若 Places API 查不到資料，也會退回座標反查地址。
+- `app/services/reviews.py`: 處理評論摘要流程。會先整理 Places API 回來的 reviews，再送到 Azure OpenAI 產生繁體中文摘要，同時處理 fallback、錯誤訊息與摘要格式統一。
+- `app/services/articles.py`: 負責搜尋景點相關文章，整理外部搜尋結果，讓回傳或 Notion 頁面可以附帶參考連結。
+- `app/services/notion.py`: 專門處理 Notion 寫入邏輯。包含欄位對應、頁面內容 block 組裝、資料庫 schema 判斷，以及實際建立 Notion page 或 database row。
+- `app/utils/region.py`: 放與地區判斷有關的純工具函式，例如把地址對應到 `濟州市`、`西部`、`西歸浦`、`東部`，以及依區域推算 `Day1~Day4` 與評分星等文字。
+- `Dockerfile`: Railway 容器部署設定。定義部署時使用的 Python 基底映像、依賴安裝方式與容器啟動指令。
+- `Procfile`: 提供給支援 Procfile 的雲端平台使用的啟動指令，告訴平台要如何啟動這個 FastAPI 服務。
+- `requirements.txt`: Python 套件依賴清單。
+- `.env.example`: 環境變數範例。
+- `images/`: README 使用的示意圖片。
+
 ## 環境變數
 
 請先複製範例檔：
@@ -96,7 +114,7 @@ curl http://127.0.0.1:3000/
 {"status":"ok"}
 ```
 
-## API
+## 本機 API 測試
 
 ### `GET /`
 
@@ -206,7 +224,7 @@ curl https://your-app.up.railway.app/
 {"status":"ok"}
 ```
 
-## 手機與電腦使用方式
+## 正式 API 使用 - 手機 / 電腦
 
 ### 電腦
 
