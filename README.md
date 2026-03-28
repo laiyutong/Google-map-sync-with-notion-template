@@ -237,7 +237,7 @@ https://your-app.up.railway.app/save-preview-link?url=https%3A%2F%2Fmaps.app.goo
 
 如果你希望送出後留在捷徑內顯示結果、不跳到 Safari，可依下列流程設定：
 
-1. 新增捷徑，點右上角 `i`，開啟「在分享表單中顯示」。
+1. 新增捷徑，點畫面下面中間 `i`，開啟「在分享表單中顯示」。
 2. 在「接受的內容」只勾選 `URL`。
 3. 加入 `從輸入取得 URL` 動作，接收 Google Maps 分享連結。
 4. 加入 `URL 編碼` 動作，輸入選上一步的 `URL`。
@@ -260,6 +260,8 @@ https://your-app.up.railway.app/save-link?url=[更新的文字]
 ```text
 https://your-app.up.railway.app/save-preview-link?url=[更新的文字]
 ```
+
+![Railway 部署成功畫面](./images/railway-deploy-success.png)
 
 ## 疑難排解
 
