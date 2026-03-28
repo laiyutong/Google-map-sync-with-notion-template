@@ -1,3 +1,15 @@
+"""評論摘要 service。
+
+這支檔案主要負責：
+1. 清理 Google Places 回來的評論資料。
+2. 呼叫 Azure OpenAI 產出繁體中文摘要。
+3. 在模型失敗、未設定或沒有評論時提供 fallback。
+4. 將最終摘要整理成固定格式，方便 API 與 Notion 使用。
+
+它在整個流程中的位置大致是：
+原始評論 -> 可讀的繁體中文摘要
+"""
+
 import json
 import re
 from typing import Any
@@ -13,7 +25,11 @@ from app.config import (
 
 
 def parse_json_response(content: str) -> dict[str, Any]:
-    """解析模型輸出的 JSON 內容。"""
+    """解析模型輸出的 JSON 內容。
+
+    有些模型雖然被要求回傳 JSON，仍可能包在 ```json code fence 裡，
+    所以這裡會先把外層 markdown 標記移除再做解析。
+    """
     cleaned = content.strip()
     if cleaned.startswith('```'):
         cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
@@ -46,7 +62,13 @@ def attach_review_metadata(
 
 
 def sanitize_reviews_for_summary(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """整理評論內容，避免模型收到空白或過長資料。"""
+    """整理評論內容，避免模型收到空白或過長資料。
+
+    這裡會：
+    - 移除空白評論
+    - 壓縮多餘空白
+    - 限制單篇評論長度，避免模型輸入過長
+    """
     sanitized_reviews: list[dict[str, Any]] = []
     for review in reviews:
         text = re.sub(r'\s+', ' ', str(review.get('text', '') or '')).strip()
@@ -64,7 +86,12 @@ def sanitize_reviews_for_summary(reviews: list[dict[str, Any]]) -> list[dict[str
 
 
 def normalize_review_summary(summary: dict[str, Any], default_message: str) -> dict[str, Any]:
-    """將模型或 fallback 產出的摘要整理成固定格式。"""
+    """將模型或 fallback 產出的摘要整理成固定格式。
+
+    不論資料來自模型還是 fallback，最終都會被整理成：
+    - `overall_summary`: 最多 5 句摘要
+    - `category_highlights`: 固定分類的摘要字典
+    """
     overall_summary_raw = summary.get('overall_summary', [])
     if isinstance(overall_summary_raw, list):
         overall_summary = [
@@ -100,7 +127,14 @@ def normalize_review_summary(summary: dict[str, Any], default_message: str) -> d
 
 
 def extract_azure_message_content(data: dict[str, Any]) -> str:
-    """兼容 Azure OpenAI 不同 content 結構。"""
+    """兼容 Azure OpenAI 不同 content 結構。
+
+    Azure OpenAI 的 `message.content` 可能是：
+    - 單純字串
+    - 多段 list 結構
+
+    這裡的目的是把它統一抽成一段文字，再交給 JSON parser。
+    """
     choices = data.get('choices')
     if not isinstance(choices, list) or not choices:
         raise KeyError('Azure OpenAI choices is missing')
@@ -156,11 +190,20 @@ async def summarize_reviews_with_azure(
     place_name: str,
     reviews: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """使用 Azure OpenAI 將評論整理成繁中摘要。"""
+    """使用 Azure OpenAI 將評論整理成繁中摘要。
+
+    這支函式會先處理 3 種情況：
+    1. 沒有可用評論。
+    2. Azure OpenAI 未設定。
+    3. Azure OpenAI HTTP 或格式錯誤。
+
+    只有在都正常時，才會真正採用模型輸出的摘要。
+    """
     sanitized_reviews = sanitize_reviews_for_summary(reviews)
     if not sanitized_reviews:
         return build_empty_review_summary('目前抓不到可分析的評論。')
 
+    # 若沒有設定 Azure OpenAI，就直接走 fallback，避免主流程失敗。
     if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_API_KEY:
         fallback_summary = build_review_summary_fallback(sanitized_reviews)
         return attach_review_metadata(
@@ -172,6 +215,7 @@ async def summarize_reviews_with_azure(
             review_error='未設定 AZURE_OPENAI_ENDPOINT 或 AZURE_OPENAI_API_KEY',
         )
 
+    # 明確要求模型輸出 JSON，方便後續程式穩定解析。
     payload = {
         'messages': [
             {
@@ -202,6 +246,7 @@ async def summarize_reviews_with_azure(
         'response_format': {'type': 'json_object'},
     }
 
+    # 摘要模型可能較慢，因此這裡使用較長的 timeout。
     async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
         try:
             response = await client.post(
@@ -225,6 +270,7 @@ async def summarize_reviews_with_azure(
                 review_error=str(exc),
             )
 
+    # 嘗試把模型輸出還原成乾淨的 JSON 物件。
     try:
         data = response.json()
         message = extract_azure_message_content(data)
@@ -259,7 +305,11 @@ async def summarize_reviews_with_azure(
 
 
 async def build_review_summary(place_name: str, reviews: list[dict[str, Any]]) -> dict[str, Any]:
-    """使用 Places API reviews 與 Azure OpenAI 產出摘要。"""
+    """使用 Places API reviews 與 Azure OpenAI 產出摘要。
+
+    這是一般情況下的主要入口，會先限制評論數量，
+    再呼叫 Azure 摘要流程，最後補上 review_count 等額外資訊。
+    """
     sanitized_reviews = sanitize_reviews_for_summary(reviews)[:REVIEW_LIMIT]
     if not sanitized_reviews:
         summary = attach_review_metadata(
@@ -281,7 +331,14 @@ async def build_review_summary_from_place(
     place_name: str,
     place: dict[str, Any],
 ) -> dict[str, Any]:
-    """固定使用 Places API reviews 整理評論摘要。"""
+    """固定使用 Places API reviews 整理評論摘要。
+
+    這支是給其他模組呼叫的方便入口：
+    直接傳入整個 `place` 物件，它會自己取出 `reviews` 欄位。
+
+    如果內部流程有非預期例外，也會盡量回傳 fallback 摘要，
+    避免整體 API 因評論摘要失敗而中斷。
+    """
     try:
         return await build_review_summary(place_name, place.get('reviews', []))
     except Exception as exc:

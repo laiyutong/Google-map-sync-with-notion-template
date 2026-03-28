@@ -1,4 +1,14 @@
-import re
+"""向地圖服務查詢景點資料的 service。
+
+這支檔案主要負責：
+1. 呼叫 Google Places API 取得景點資訊。
+2. 將 Places API 回傳內容整理成專案內部的統一格式。
+3. 當 Google Places 資料不足時，使用座標做 fallback。
+
+它在整個流程中的位置大致是：
+店名 / 座標 -> 完整景點資料
+"""
+
 from typing import Any
 
 import httpx
@@ -6,65 +16,12 @@ import httpx
 from app.config import GOOGLE_KEY, GOOGLE_PLACES_FIELD_MASK, HTTP_TIMEOUT
 
 
-async def get_google_place_photo_url(photo_name: str) -> str | None:
-    """將新版 Places Photo 資源名稱轉成可給 Notion 使用的圖片網址。"""
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        try:
-            res = await client.get(
-                f'https://places.googleapis.com/v1/{photo_name}/media',
-                params={
-                    'maxWidthPx': 1200,
-                    'skipHttpRedirect': 'true',
-                    'key': GOOGLE_KEY,
-                },
-            )
-            res.raise_for_status()
-        except httpx.HTTPError as exc:
-            print(f'⚠️ Google Places 照片取得失敗：{exc}')
-            return None
-
-    return res.json().get('photoUri')
-
-
-async def build_notion_photo_asset(photo_url: str) -> dict[str, str] | None:
-    """挑出 Notion 可預覽的圖片連結，僅接受原始檔名為 jpg/png。"""
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        timeout=HTTP_TIMEOUT,
-    ) as client:
-        try:
-            res = await client.get(photo_url)
-            res.raise_for_status()
-        except httpx.HTTPError as exc:
-            print(f'⚠️ Notion 圖片檢查失敗：{exc}')
-            return None
-
-    content_type = (res.headers.get('content-type') or '').split(';', maxsplit=1)[0].strip().lower()
-    if content_type not in {'image/jpeg', 'image/jpg', 'image/png'}:
-        print(f'⚠️ Notion 不接受的圖片格式：{content_type}')
-        return None
-
-    content_disposition = res.headers.get('content-disposition', '')
-    filename_match = re.search(r'filename=\"?([^\";]+)\"?', content_disposition, re.IGNORECASE)
-    if not filename_match:
-        print('⚠️ 找不到圖片原始檔名，略過寫入 Notion 照片欄位')
-        return None
-
-    original_filename = filename_match.group(1).strip()
-    lower_filename = original_filename.lower()
-    if not (lower_filename.endswith('.jpg') or lower_filename.endswith('.jpeg') or lower_filename.endswith('.png')):
-        print(f'⚠️ 原始圖片檔名不是 jpg/png：{original_filename}')
-        return None
-
-    return {
-        'url': str(res.url),
-        'name': original_filename,
-        'content_type': content_type,
-    }
-
-
 def normalize_places_reviews(places_reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """將 Places API reviews 轉成統一結構。"""
+    """將 Places API reviews 轉成統一結構。
+
+    後續評論摘要流程只需要星等與文字內容，
+    所以這裡會先把 Google Places 原始欄位整理成精簡格式。
+    """
     normalized: list[dict[str, Any]] = []
     for review in places_reviews:
         text = (
@@ -86,7 +43,14 @@ def normalize_places_reviews(places_reviews: list[dict[str, Any]]) -> list[dict[
 
 
 async def try_google_places_lookup(place_name: str) -> dict[str, Any] | None:
-    """優先使用 Places API (New) 取得完整景點資訊。"""
+    """優先使用 Places API (New) 取得完整景點資訊。
+
+    這支函式會：
+    1. 用店名搜尋 Google Places。
+    2. 取第一筆最可能的景點結果。
+    3. 組成專案統一使用的景點資料格式。
+    """
+    # 如果沒有設定 Google API Key，就直接跳過 Google Places 查詢。
     if not GOOGLE_KEY:
         return None
 
@@ -117,18 +81,12 @@ async def try_google_places_lookup(place_name: str) -> dict[str, Any] | None:
             print(f'⚠️ Google Places 查詢失敗：{exc}')
             return None
 
+        # 搜尋結果可能為空，這時交由後續 fallback 處理。
         places = search_data.get('places', [])
         if not places:
             return None
 
         place = places[0]
-        photo_name = ((place.get('photos') or [{}])[0]).get('name')
-        photo_asset: dict[str, str] | None = None
-        if photo_name:
-            google_photo_url = await get_google_place_photo_url(photo_name)
-            if google_photo_url:
-                photo_asset = await build_notion_photo_asset(google_photo_url)
-
         return {
             'name': place.get('displayName', {}).get('text', place_name),
             'formatted_address': place.get('formattedAddress', ''),
@@ -139,9 +97,6 @@ async def try_google_places_lookup(place_name: str) -> dict[str, Any] | None:
                     place.get('regularOpeningHours', {}).get('weekdayDescriptions', [])
                 )
             },
-            'photo_url': photo_asset['url'] if photo_asset else None,
-            'photo_name': photo_asset['name'] if photo_asset else None,
-            'photo_content_type': photo_asset['content_type'] if photo_asset else None,
             'rating': place.get('rating'),
             'google_maps_url': place.get('googleMapsUri'),
             'reviews': normalize_places_reviews(place.get('reviews', [])),
@@ -149,7 +104,11 @@ async def try_google_places_lookup(place_name: str) -> dict[str, Any] | None:
 
 
 async def reverse_geocode(lat: float, lng: float) -> str:
-    """用座標向 OpenStreetMap 反查地址，避免被 Google Places API 綁死。"""
+    """用座標向 OpenStreetMap 反查地址，避免被 Google Places API 綁死。
+
+    當 Places API 無法提供可用地址時，至少還能依座標反查出基本地址，
+    讓後續區域判斷與 Notion 寫入仍有資料可用。
+    """
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         try:
             res = await client.get(
@@ -172,25 +131,31 @@ async def reverse_geocode(lat: float, lng: float) -> str:
 
 
 async def get_place_details(place_name: str, expanded_url: str) -> dict[str, Any]:
-    """取得可寫入 Notion 的景點資料。"""
+    """取得可寫入 Notion 的景點資料。
+
+    fallback 順序如下：
+    1. 先試 Google Places API。
+    2. 若失敗，從展開後網址中抓座標。
+    3. 若有座標，使用 OpenStreetMap 反查地址。
+    4. 若連座標都沒有，就只保留最基本的店名與原始網址。
+    """
     google_result = await try_google_places_lookup(place_name)
     if google_result:
         google_result['data_source'] = 'google_places_new'
         return google_result
 
+    # 避免循環匯入：只有在 fallback 路徑需要時才延後匯入。
     from app.services.maps import extract_coordinates
 
     coordinates = extract_coordinates(expanded_url)
     if not coordinates:
+        # 沒有座標時，只能回傳最基本的資料，讓主流程不要整個失敗。
         return {
             'name': place_name,
             'formatted_address': '',
             'latitude': None,
             'longitude': None,
             'opening_hours': {},
-            'photo_url': None,
-            'photo_name': None,
-            'photo_content_type': None,
             'rating': None,
             'google_maps_url': expanded_url,
             'data_source': 'fallback_url_only',
@@ -200,15 +165,13 @@ async def get_place_details(place_name: str, expanded_url: str) -> dict[str, Any
     lat, lng = coordinates
     address = await reverse_geocode(lat, lng)
 
+    # 至少保留座標與反查地址，供後續 Notion 寫入與區域判斷使用。
     return {
         'name': place_name,
         'formatted_address': address,
         'latitude': lat,
         'longitude': lng,
         'opening_hours': {},
-        'photo_url': None,
-        'photo_name': None,
-        'photo_content_type': None,
         'rating': None,
         'google_maps_url': expanded_url,
         'data_source': 'fallback_reverse_geocode',

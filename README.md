@@ -6,7 +6,7 @@
 
 1. 展開 Google Maps 短網址。
 2. 解析景點名稱與座標。
-3. 優先用 Google Places API 補齊地址、評分、照片與評論。
+3. 優先用 Google Places API 補齊地址、評分與評論。
 4. 必要時用 OpenStreetMap 反查地址。
 5. 使用 Google Places API reviews 作為評論來源。
 6. 使用 Azure OpenAI 將評論整理成繁體中文摘要。
@@ -18,7 +18,7 @@
 - 支援 `Google Maps` 分享網址解析
 - 支援 `Notion` Database 與 Page 兩種寫入模式
 - 自動依地址判斷區域與行程天數
-- 支援 Google Places 圖片與評分同步
+- 支援 Google Places 評分同步
 - 支援 Places API 評論摘要整理
 - 支援文章搜尋補充參考資料
 - 提供預覽 API，寫入前可先檢查資料
@@ -41,7 +41,7 @@
 
 ### 1. 取得 Google Places API Key
 
-此專案會使用 Google Places API 查詢景點名稱、地址、評分、照片與評論，因此必須先建立一組可用的 API Key。
+此專案會使用 Google Places API 查詢景點名稱、地址、評分與評論，因此必須先建立一組可用的 API Key。
 
 操作步驟如下：
 
@@ -191,13 +191,13 @@ NOTION_DATABASE_ID=...
 - `app/config.py`: 集中管理環境變數、常數與共用 client，例如 `GOOGLE_PLACES_API_KEY`、`AZURE_OPENAI_ENDPOINT`、`NOTION_TOKEN`、`HTTP_TIMEOUT` 與 Notion client，避免分散在各個檔案裡。
 - `app/schemas/requests.py`: 定義 API 請求資料格式。目前主要用來描述 `SaveRequest`，也就是 API 需要接收一個 `url` 字串欄位。
 - `app/services/maps.py`: 處理 Google Maps 分享連結相關邏輯，例如展開短網址、清理分享參數、解析店名與座標，並將網址轉成後續 service 可使用的地點資訊。
-- `app/services/places.py`: 專門和 Google Places API 溝通。負責查詢地點資料、取得照片、地址、評論與經緯度，若 Places API 查不到資料，也會退回座標反查地址。
+- `app/services/places.py`: 專門和 Google Places API 溝通。負責查詢地點資料、取得地址、評分、評論與經緯度，若 Places API 查不到資料，也會退回座標反查地址。
 - `app/services/reviews.py`: 處理評論摘要流程。會先整理 Places API 回來的 reviews，再送到 Azure OpenAI 產生繁體中文摘要，同時處理 fallback、錯誤訊息與摘要格式統一。
 - `app/services/articles.py`: 負責搜尋景點相關文章，整理外部搜尋結果，讓回傳或 Notion 頁面可以附帶參考連結。
 - `app/services/notion.py`: 專門處理 Notion 寫入邏輯。包含欄位對應、頁面內容 block 組裝、資料庫 schema 判斷，以及實際建立 Notion page 或 database row。
 - `app/utils/region.py`: 放與地區判斷有關的純工具函式，例如把地址對應到 `濟州市`、`西部`、`西歸浦`、`東部`，以及依區域推算 `Day1~Day4` 與評分星等文字。
-- `Dockerfile`: Railway 容器部署設定。定義部署時使用的 Python 基底映像、依賴安裝方式與容器啟動指令。
-- `Procfile`: 提供給支援 Procfile 的雲端平台使用的啟動指令，告訴平台要如何啟動這個 FastAPI 服務。
+- `Dockerfile`: 給容器型部署平台使用的設定檔，例如 Railway 會先依照這份檔案建置映像，再使用裡面的 `CMD` 啟動 FastAPI 服務。
+- `Procfile`: 給支援 Procfile 的平台使用的啟動指令，直接告訴平台要如何啟動 Web 服務；如果平台已經使用 `Dockerfile`，通常可以把它視為備用設定。
 - `requirements.txt`: Python 套件依賴清單。
 - `.env.example`: 環境變數範例。
 - `images/`: README 使用的示意圖片。
@@ -459,4 +459,3 @@ https://your-app.up.railway.app/save-preview-link?url=[更新的文字]
 ## 後續建議
 
 - 補上 `pytest` 測試，覆蓋 URL 解析、區域判斷與 Notion payload 組裝
-- 將 `main.py` 拆分成 `services`、`clients`、`schemas`，降低單檔維護成本

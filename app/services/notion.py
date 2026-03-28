@@ -1,3 +1,15 @@
+"""處理 Notion 寫入的 service。
+
+這支檔案主要負責：
+1. 將景點資料轉成 Notion properties 與 block children。
+2. 尋找可寫入的目標 data source / database。
+3. 依不同欄位型別組裝 Notion API payload。
+4. 建立資料列或子頁，並翻譯常見錯誤訊息。
+
+它在整個流程中的位置大致是：
+整理好的景點資料 -> Notion 頁面 / database row
+"""
+
 from typing import Any
 
 from fastapi import HTTPException
@@ -14,11 +26,16 @@ def build_notion_children(
     review_summary: dict[str, Any] | None = None,
     related_articles: list[dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """建立頁面內容區塊，供 database/page 兩種父層共用。"""
+    """建立頁面內容區塊，供 database/page 兩種父層共用。
+
+    這裡組出的是 Notion page 內文 blocks，
+    包括評分、營業時間、評論摘要、相關文章與分類重點。
+    """
     rating = place.get('rating')
     rating_text = f'{rating:.1f}' if isinstance(rating, int | float) else '未提供'
     hours_lines = place.get('opening_hours', {}).get('weekday_text', [])
 
+    # 先放最基本的評分資訊。
     children = [
         {
             'object': 'block',
@@ -32,6 +49,7 @@ def build_notion_children(
         },
     ]
 
+    # 營業時間有資料時，逐行拆成條列。
     if hours_lines:
         children.append(
             {
@@ -70,6 +88,7 @@ def build_notion_children(
             }
         )
 
+    # 若有評論摘要，就補上摘要段落。
     if review_summary:
         children.append(
             {
@@ -95,6 +114,7 @@ def build_notion_children(
                 }
             )
 
+    # 若有補充文章，將標題做成可點擊連結。
     if related_articles:
         children.append(
             {
@@ -125,6 +145,7 @@ def build_notion_children(
                 }
             )
 
+    # 再將評論分類重點逐項列出，方便在 Notion 內快速掃讀。
     if review_summary:
         children.append(
             {
@@ -162,7 +183,13 @@ def build_notion_children(
 
 
 def find_target_data_source() -> tuple[str, dict[str, Any]] | None:
-    """在可存取的 Notion data source 中找出目標資料庫與欄位定義。"""
+    """在可存取的 Notion data source 中找出目標資料庫與欄位定義。
+
+    尋找規則如下：
+    1. 優先找名稱完全等於 `NOTION_TARGET_NAME` 的 data source。
+    2. 若只有一個可用 data source，就直接使用它。
+    3. 否則退回第一個找到的候選項。
+    """
     try:
         search_result = notion.search(
             filter={'property': 'object', 'value': 'data_source'}
@@ -208,10 +235,16 @@ def build_database_properties(
     region: str,
     schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """依照實際資料庫欄位型別建立 Notion properties。"""
+    """依照實際資料庫欄位型別建立 Notion properties。
+
+    Notion 不同資料庫的欄位型別可能不同，
+    所以這裡會根據實際 schema 決定要填 `title`、`select`、
+    `multi_select`、`url` 或 `number` 等格式。
+    """
     schema = schema or {}
     title_property_name = 'Name'
 
+    # 找出真正的 title 欄位名稱，不強制一定叫做 Name。
     for property_name, metadata in schema.items():
         if metadata.get('type') == 'title':
             title_property_name = property_name
@@ -240,8 +273,10 @@ def build_database_properties(
         elif property_type == 'title':
             properties[property_name] = {'title': [{'text': {'content': str(value)}}]}
 
+    # 將區域轉成對應行程天數，例如 Day1~Day4。
     day_name = detect_day(region)
 
+    # 依資料庫欄位型別填入「分類」。
     category_schema = schema.get('分類')
     if category_schema:
         category_type = category_schema.get('type')
@@ -250,6 +285,7 @@ def build_database_properties(
         elif category_type == 'select':
             properties['分類'] = {'select': {'name': region}}
 
+    # 依資料庫欄位型別填入「日程」。
     schedule_schema = schema.get('日程')
     if schedule_schema:
         schedule_type = schedule_schema.get('type')
@@ -258,11 +294,13 @@ def build_database_properties(
         elif schedule_type == 'select':
             properties['日程'] = {'select': {'name': day_name}}
 
+    # 若資料庫有 Google Map 欄位，填入原始或補充後的 Google Maps 連結。
     google_map_url = place.get('google_maps_url') or source_url
     google_map_schema = schema.get('Google Map')
     if google_map_url and google_map_schema and google_map_schema.get('type') == 'url':
         properties['Google Map'] = {'url': google_map_url}
 
+    # 將數字評分轉成星等文字，再寫進 Notion。
     rating_text = rating_to_stars(place.get('rating'))
     rating_schema = schema.get('評分')
     if rating_text and rating_schema:
@@ -284,7 +322,14 @@ def create_notion_page(
     review_summary: dict[str, Any] | None = None,
     related_articles: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """建立 Notion 頁面。"""
+    """建立 Notion 頁面。
+
+    寫入順序如下：
+    1. 先建立共用的 page 內容 blocks。
+    2. 嘗試找到指定的 data source / database。
+    3. 若找到資料庫，建立 database row。
+    4. 若 `DB_ID` 其實是 page，則退回建立子頁模式。
+    """
     region = detect_region(place.get('formatted_address', ''))
     children = build_notion_children(place, source_url, region, review_summary, related_articles)
     target_data_source = find_target_data_source()
@@ -302,6 +347,7 @@ def create_notion_page(
             **payload,
         )
 
+    # 若找不到特定 data source，就直接用 `.env` 的 `DB_ID` 嘗試寫入。
     properties = build_database_properties(place, source_url, region)
 
     try:
@@ -313,6 +359,7 @@ def create_notion_page(
 
         return notion.pages.create(**payload)
     except APIResponseError as exc:
+        # 如果 `DB_ID` 其實是 page 而不是 database，就改用子頁模式。
         if 'is a page, not a database' not in str(exc):
             raise
 
@@ -330,7 +377,10 @@ def create_notion_page(
 
 
 def translate_notion_error(exc: APIResponseError) -> HTTPException:
-    """將 Notion API 錯誤轉成使用者看得懂的訊息。"""
+    """將 Notion API 錯誤轉成使用者看得懂的訊息。
+
+    這樣 API 呼叫端就不需要直接面對 Notion SDK 原始錯誤文字。
+    """
     error_text = str(exc)
 
     if 'Could not find page with ID' in error_text:
