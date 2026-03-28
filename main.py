@@ -40,6 +40,16 @@ REGION_DAY_MAP = {
     '西歸浦': 'Day3',
     '東部': 'Day4',
 }
+REVIEW_SUMMARY_CATEGORIES = [
+    '餐點',
+    '服務',
+    '環境',
+    '排隊',
+    '停車',
+    '價格',
+    '適合族群',
+    '雷點',
+]
 REVIEW_LIMIT = 50
 ARTICLE_LIMIT = 5
 
@@ -318,6 +328,90 @@ def normalize_places_reviews(places_reviews: list[dict[str, Any]]) -> list[dict[
     return normalized
 
 
+def build_empty_review_summary(message: str) -> dict[str, Any]:
+    """建立沒有可用評論時的預設摘要結構。"""
+    return {
+        'overall_summary': [message],
+        'category_highlights': {
+            category: '幾乎未提及'
+            for category in REVIEW_SUMMARY_CATEGORIES
+        },
+    }
+
+
+def sanitize_reviews_for_summary(reviews: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """整理評論內容，避免模型收到空白或過長資料。"""
+    sanitized_reviews: list[dict[str, Any]] = []
+    for review in reviews:
+        text = re.sub(r'\s+', ' ', str(review.get('text', '') or '')).strip()
+        if not text:
+            continue
+
+        sanitized_reviews.append(
+            {
+                'stars': review.get('stars'),
+                'text': text[:1500],
+            }
+        )
+
+    return sanitized_reviews
+
+
+def normalize_review_summary(summary: dict[str, Any], default_message: str) -> dict[str, Any]:
+    """將模型或 fallback 產出的摘要整理成固定格式。"""
+    overall_summary_raw = summary.get('overall_summary', [])
+    if isinstance(overall_summary_raw, list):
+        overall_summary = [
+            re.sub(r'\s+', ' ', str(item)).strip()
+            for item in overall_summary_raw
+            if str(item).strip()
+        ]
+    elif isinstance(overall_summary_raw, str) and overall_summary_raw.strip():
+        overall_summary = [re.sub(r'\s+', ' ', overall_summary_raw).strip()]
+    else:
+        overall_summary = []
+
+    if not overall_summary:
+        overall_summary = [default_message]
+
+    category_highlights_raw = summary.get('category_highlights', {})
+    if not isinstance(category_highlights_raw, dict):
+        category_highlights_raw = {}
+
+    category_highlights = {
+        category: re.sub(
+            r'\s+',
+            ' ',
+            str(category_highlights_raw.get(category, '幾乎未提及')),
+        ).strip() or '幾乎未提及'
+        for category in REVIEW_SUMMARY_CATEGORIES
+    }
+
+    return {
+        'overall_summary': overall_summary[:5],
+        'category_highlights': category_highlights,
+    }
+
+
+def extract_azure_message_content(data: dict[str, Any]) -> str:
+    """兼容 Azure OpenAI 不同 content 結構。"""
+    message_content = data['choices'][0]['message']['content']
+    if isinstance(message_content, str):
+        return message_content
+
+    if isinstance(message_content, list):
+        text_parts: list[str] = []
+        for item in message_content:
+            if isinstance(item, dict) and item.get('type') == 'text':
+                text_value = item.get('text')
+                if isinstance(text_value, str):
+                    text_parts.append(text_value)
+        if text_parts:
+            return ''.join(text_parts)
+
+    raise KeyError('Azure OpenAI content format is unsupported')
+
+
 async def try_google_places_lookup(place_name: str) -> dict[str, Any] | None:
     """優先使用 Places API (New) 取得完整景點資訊。"""
     if not GOOGLE_KEY:
@@ -589,17 +683,14 @@ async def scrape_google_maps_reviews(map_url: str, limit: int = REVIEW_LIMIT) ->
 
 def build_review_summary_fallback(reviews: list[dict[str, Any]]) -> dict[str, Any]:
     """當模型不可用時，提供最基本的評論摘要。"""
+    if not reviews:
+        return build_empty_review_summary('目前抓不到可分析的評論。')
+
     return {
         'overall_summary': ['已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。'],
         'category_highlights': {
-            '餐點': '需人工補充',
-            '服務': '需人工補充',
-            '環境': '需人工補充',
-            '排隊': '需人工補充',
-            '停車': '需人工補充',
-            '價格': '需人工補充',
-            '適合族群': '需人工補充',
-            '雷點': '需人工補充',
+            category: '需人工補充'
+            for category in REVIEW_SUMMARY_CATEGORIES
         },
     }
 
@@ -609,23 +700,16 @@ async def summarize_reviews_with_azure(
     reviews: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """使用 Azure OpenAI 將評論整理成繁中摘要。"""
-    if not reviews:
-        return {
-            'overall_summary': ['目前抓不到可分析的評論。'],
-            'category_highlights': {
-                '餐點': '幾乎未提及',
-                '服務': '幾乎未提及',
-                '環境': '幾乎未提及',
-                '排隊': '幾乎未提及',
-                '停車': '幾乎未提及',
-                '價格': '幾乎未提及',
-                '適合族群': '幾乎未提及',
-                '雷點': '幾乎未提及',
-            },
-        }
+    sanitized_reviews = sanitize_reviews_for_summary(reviews)
+    if not sanitized_reviews:
+        return build_empty_review_summary('目前抓不到可分析的評論。')
 
     if not AZURE_OPENAI_ENDPOINT or not AZURE_OPENAI_API_KEY:
-        return build_review_summary_fallback(reviews)
+        fallback_summary = build_review_summary_fallback(sanitized_reviews)
+        return normalize_review_summary(
+            fallback_summary,
+            '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+        )
 
     payload = {
         'messages': [
@@ -634,6 +718,7 @@ async def summarize_reviews_with_azure(
                 'content': (
                     '你是旅遊評論分析助手。請根據提供的 Google Maps 評論，用繁體中文輸出 JSON。'
                     '請客觀整理，不要杜撰未提及內容。若資訊不足，請寫「少量提及」或「幾乎未提及」。'
+                    '請務必回傳 overall_summary 與 category_highlights 兩個欄位。'
                 ),
             },
             {
@@ -641,21 +726,12 @@ async def summarize_reviews_with_azure(
                 'content': json.dumps(
                     {
                         'place_name': place_name,
-                        'review_count': len(reviews),
+                        'review_count': len(sanitized_reviews),
                         'required_format': {
                             'overall_summary': ['3到5句繁中摘要'],
-                            'category_highlights': {
-                                '餐點': 'string',
-                                '服務': 'string',
-                                '環境': 'string',
-                                '排隊': 'string',
-                                '停車': 'string',
-                                '價格': 'string',
-                                '適合族群': 'string',
-                                '雷點': 'string',
-                            },
+                            'category_highlights': {category: 'string' for category in REVIEW_SUMMARY_CATEGORIES},
                         },
-                        'reviews': reviews,
+                        'reviews': sanitized_reviews,
                     },
                     ensure_ascii=False,
                 ),
@@ -678,17 +754,25 @@ async def summarize_reviews_with_azure(
             response.raise_for_status()
         except httpx.HTTPError as exc:
             print(f'⚠️ Azure OpenAI 摘要失敗：{exc}')
-            return build_review_summary_fallback(reviews)
+            fallback_summary = build_review_summary_fallback(sanitized_reviews)
+            return normalize_review_summary(
+                fallback_summary,
+                '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+            )
 
     data = response.json()
-    message = data['choices'][0]['message']['content']
     try:
+        message = extract_azure_message_content(data)
         summary = parse_json_response(message)
     except (KeyError, json.JSONDecodeError) as exc:
         print(f'⚠️ Azure OpenAI 回傳格式異常：{exc}')
-        return build_review_summary_fallback(reviews)
+        fallback_summary = build_review_summary_fallback(sanitized_reviews)
+        return normalize_review_summary(
+            fallback_summary,
+            '已成功抓取評論，但 Azure OpenAI 摘要暫時不可用。',
+        )
 
-    return summary
+    return normalize_review_summary(summary, '已成功抓取評論，但摘要內容不足。')
 
 
 async def build_review_summary(place_name: str, map_url: str) -> dict[str, Any]:
@@ -696,6 +780,7 @@ async def build_review_summary(place_name: str, map_url: str) -> dict[str, Any]:
     reviews = await scrape_google_maps_reviews(map_url, REVIEW_LIMIT)
     summary = await summarize_reviews_with_azure(place_name, reviews)
     summary['review_count'] = len(reviews)
+    summary['review_source'] = 'google_maps_playwright'
     return summary
 
 
@@ -710,12 +795,22 @@ async def build_review_summary_with_fallback(
     except HTTPException as exc:
         fallback_reviews = place.get('reviews', [])
         if not fallback_reviews:
-            raise exc
+            print(f'⚠️ 評論 fallback 無可用評論：{exc.detail}')
+            summary = build_empty_review_summary('目前抓不到可分析的評論。')
+            summary['review_count'] = 0
+            summary['review_source'] = 'no_reviews_available'
+            return summary
 
         print(f'⚠️ 改用 Places API reviews fallback：{exc.detail}')
         summary = await summarize_reviews_with_azure(place_name, fallback_reviews)
         summary['review_count'] = len(fallback_reviews)
         summary['review_source'] = 'places_api_fallback'
+        return summary
+    except Exception as exc:
+        print(f'⚠️ 評論摘要非預期錯誤：{exc}')
+        summary = build_empty_review_summary('評論摘要流程失敗，請稍後再試。')
+        summary['review_count'] = 0
+        summary['review_source'] = 'summary_error'
         return summary
 
 
