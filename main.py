@@ -1104,15 +1104,16 @@ def translate_notion_error(exc: APIResponseError) -> HTTPException:
 
 async def resolve_place_from_url(url: str) -> tuple[str, str, dict[str, Any], str, str]:
     """解析分享網址並產出可預覽/寫入的景點資料。"""
-    normalized_url = normalize_google_maps_share_url(url)
-    if normalized_url != url:
-        print(f'🧹 已清理分享參數：{normalized_url}')
-
     try:
-        expanded_url = await expand_url(normalized_url)
+        expanded_url = await expand_url(url)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=400, detail=f'無法展開分享網址：{exc}') from exc
 
+    normalized_expanded_url = normalize_google_maps_share_url(expanded_url)
+    if normalized_expanded_url != expanded_url:
+        print(f'🧹 已清理展開後分享參數：{normalized_expanded_url}')
+
+    expanded_url = normalized_expanded_url
     print(f'🔗 展開：{expanded_url}')
 
     place_name = extract_place_name(expanded_url)
@@ -1207,14 +1208,14 @@ async def collect_enriched_place_data(
 # API Endpoint
 @app.post('/save-preview')
 async def save_preview(req: SaveRequest) -> dict[str, Any]:
-    normalized_url = normalize_google_maps_share_url(req.url)
-    print(f'🔎 預覽：{normalized_url}')
+    source_url = req.url.strip()
+    print(f'🔎 預覽：{source_url}')
     expanded_url, place, region, day, review_summary, related_articles = (
-        await collect_enriched_place_data(normalized_url)
+        await collect_enriched_place_data(source_url)
     )
 
     return build_preview_payload(
-        normalized_url,
+        source_url,
         expanded_url,
         place,
         region,
@@ -1226,12 +1227,12 @@ async def save_preview(req: SaveRequest) -> dict[str, Any]:
 
 @app.post('/save')
 async def save(req: SaveRequest) -> dict[str, Any]:
-    normalized_url = normalize_google_maps_share_url(req.url)
-    print(f'📥 收到：{normalized_url}')
-    _, place, region, _, review_summary, related_articles = await collect_enriched_place_data(normalized_url)
+    source_url = req.url.strip()
+    print(f'📥 收到：{source_url}')
+    _, place, region, _, review_summary, related_articles = await collect_enriched_place_data(source_url)
 
     try:
-        page = create_notion_page(place, normalized_url, review_summary, related_articles)
+        page = create_notion_page(place, source_url, review_summary, related_articles)
     except APIResponseError as exc:
         raise translate_notion_error(exc) from exc
 

@@ -257,6 +257,34 @@ https://your-app.up.railway.app/save-link?url=[已編碼的文字]
 https://your-app.up.railway.app/save-preview-link?url=[已編碼的文字]
 ```
 
+## 疑難排解
+
+### 如何快速判斷 Places API 是否正常
+
+先看 `/save-preview` 回傳裡的 `data_source`：
+
+- `google_places_new`
+  - 代表 Google Places API 有成功查到地點資料。
+  - 如果這時 `review_count = 0`，問題通常比較偏向 `reviews` 欄位沒有回來，或本機與 Railway 的 Places API 回應內容不同。
+
+- `fallback_reverse_geocode`
+  - 代表 Google Places API 沒有成功查到完整地點資料，程式已退回座標反查地址。
+  - 這種情況通常優先檢查 Railway 的 `GOOGLE_PLACES_API_KEY`、Places API 是否已啟用、Billing 是否正常，以及是否有 API restrictions 導致雲端環境無法使用。
+
+### 如何快速判斷評論摘要卡在哪一層
+
+再看 `review_source` 與 `review_error`：
+
+- `google_places_reviews/azure_openai`
+  - 代表 Places API reviews 與 Azure OpenAI 摘要都成功。
+
+- `google_places_reviews/azure_fallback_http_error`
+  - 代表 Places API reviews 有拿到，但 Railway 呼叫 Azure OpenAI 時發生 HTTP 錯誤。
+  - 請檢查 `AZURE_OPENAI_ENDPOINT`、`AZURE_OPENAI_API_KEY`、deployment 名稱與 `api-version` 是否正確。
+
+- `no_reviews_available`
+  - 代表 Places API 沒有提供可用評論，因此沒有內容可送進 Azure OpenAI。
+
 ## 注意事項
 
 - 評論摘要目前固定使用 Google Places API reviews，不再依賴瀏覽器自動化
