@@ -43,7 +43,7 @@ def detect_region(address: str) -> str:
     # 需要優先判斷，避免先被較大的東部分類吃掉。
     udo = [
         '우도면', '우도', '牛島', '牛岛',
-        'udomyeon', 'udobonggil', 'udori', 'udodo', 'udo',
+        'udomyeon', 'udobonggil', 'udori', 'udodo',
     ]
 
     # 東部常見行政區與多語系關鍵字。
